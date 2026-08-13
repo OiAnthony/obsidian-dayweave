@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-dayweave",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Browse and edit Obsidian daily notes in a continuous journal.",
 	"main": "main.js",
 	"type": "module",

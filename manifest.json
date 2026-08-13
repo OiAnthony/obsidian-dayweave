@@ -1,7 +1,7 @@
 {
 	"id": "dayweave",
 	"name": "Dayweave",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"minAppVersion": "1.7.2",
 	"description": "Browse and edit daily notes in a continuous journal.",
 	"author": "Anthony",
