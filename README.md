@@ -1,92 +1,44 @@
-# Obsidian Sample Plugin
+# Dayweave
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+Dayweave adds a continuous daily-note journal to Obsidian. It uses normal Markdown files as its only data source, so notes remain available to Daily Notes, search, links, and the file explorer.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+## Features
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
+- Open the journal from the `Open Dayweave journal` command or ribbon icon.
+- Start writing in today's note in one action.
+- Scroll continuously into past and future dates.
+- Create missing daily notes without leaving the journal.
+- Edit the complete file in Obsidian's own embedded Live Preview editor.
+- Keep Obsidian's Markdown decorations, properties, folding, spelling, editor settings, and registered editor extensions.
+- Use normal multiline editing: Enter creates a line, and Escape saves and returns to the rendered viewer.
+- Keep only one embedded Obsidian editor and a bounded 21-day viewer window mounted while scrolling.
+- Restore the current journal position through Obsidian workspace state.
 
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and outputs a Notice on click.
-- Registers a global interval which logs 'setInterval' to the console.
+## Daily Notes integration
 
-## First time developing plugins?
+Dayweave uses the folder, Moment date format, and template configured under **Settings -> Daily Notes**. Both interfaces read and edit the same Markdown files, so no content is copied or synchronized. The Daily Notes core plugin must be enabled before opening Dayweave.
 
-Quick starting guide for new plugin devs:
+Under **Settings -> Dayweave**, configure:
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `src/main.ts` to `main.js`.
-- Make changes to `src/main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+- **Default open position**: today or the last viewed date.
 
-## Releasing new releases
+Dayweave has two states for each date: a rendered viewer and an embedded Obsidian Live Preview editor for the complete Markdown file. Click anywhere in the viewer outside an interactive link or control to edit. Enter behaves as a normal newline; press **Escape** to save and return to the rendered viewer. Only one date can be in edit mode at a time.
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+The embedded editor uses Obsidian's internal Markdown editor because the public plugin API does not expose a mountable Live Preview editor. Dayweave checks this integration at startup. If an Obsidian update changes the internal interface, the journal remains readable and reports that editing is unavailable instead of opening a second pane or falling back to a different editor.
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+Dayweave writes the complete editor value back to the same Markdown file. If another editor changes that file while Dayweave has an unsaved draft, Dayweave refuses to overwrite the external change and keeps the draft read-only while the journal remains open. Closing the journal saves that draft as a uniquely named `*.dayweave-recovery*.md` file beside the daily note.
 
-## Adding your plugin to the community plugin list
+Dayweave only reads files in the currently mounted date window. It makes no network requests and sends no telemetry.
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+## Development
 
-## How to use
+Requires Node.js 18 or newer and npm.
 
-- Clone this repo.
-- Make sure your NodeJS is at least v18 (`node --version`).
-- `npm i` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
-
-## Manually installing the plugin
-
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
-
-## Improve code quality with eslint
-
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code.
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
-
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-	"fundingUrl": "https://buymeacoffee.com"
-}
+```bash
+npm install
+npm test
+npm run lint
+npm run build
 ```
 
-If you have multiple URLs, you can also do:
-
-```json
-{
-	"fundingUrl": {
-		"Buy Me a Coffee": "https://buymeacoffee.com",
-		"GitHub Sponsor": "https://github.com/sponsors",
-		"Patreon": "https://www.patreon.com/"
-	}
-}
-```
-
-## API Documentation
-
-See https://docs.obsidian.md
+For local development, run `npm run dev`, then install `main.js`, `manifest.json`, and `styles.css` in `<vault>/.obsidian/plugins/dayweave/`.

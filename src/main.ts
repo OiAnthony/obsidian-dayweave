@@ -1,114 +1,140 @@
+import { Notice, Plugin } from 'obsidian';
+import { CoreDailyNoteSource } from './core-daily-notes';
+import { DailyNoteStore } from './daily-note-store';
+import { DAYWEAVE_VIEW_TYPE, DayweaveView } from './dayweave-view';
+import { fromDateKey, startOfLocalDay, toDateKey } from './date';
+import { getLockedAnchorDate } from './journal-window';
 import {
-	Editor,
-	MarkdownView,
-	MarkdownFileInfo,
-	Modal,
-	Notice,
-	Plugin,
-} from 'obsidian';
+	discoverInternalEditor,
+	InternalEditorConstructor,
+} from './embedded-obsidian-editor';
 import {
+	DayweaveSettings,
+	DayweaveSettingTab,
 	DEFAULT_SETTINGS,
-	MyPluginSettings,
-	SampleSettingTab,
+	parseSettings,
 } from './settings';
 
-// Remember to rename these classes and interfaces!
+interface DayweaveData extends Partial<DayweaveSettings> {
+	lastViewedDate?: string;
+}
 
-export default class MyPlugin extends Plugin {
-	settings!: MyPluginSettings;
+export default class DayweavePlugin extends Plugin {
+	settings!: DayweaveSettings;
+	private lastViewedDate: Date | null = null;
+	private persistTimer: number | null = null;
+	private store!: DailyNoteStore;
+	private internalEditorClass: InternalEditorConstructor | null = null;
 
-	async onload() {
+	async onload(): Promise<void> {
 		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			},
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (
-				editor: Editor,
-				_ctx: MarkdownView | MarkdownFileInfo,
-			) => {
-				editor.replaceSelection('Sample editor command');
-			},
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			},
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(activeDocument, 'click', (_evt: MouseEvent) => {
-			new Notice('Click');
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(
-			window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000),
+		this.store = new DailyNoteStore(
+			this.app.vault,
+			new CoreDailyNoteSource(this.app),
 		);
+		this.internalEditorClass = discoverInternalEditor(this.app);
+
+		this.registerView(
+			DAYWEAVE_VIEW_TYPE,
+			(leaf) =>
+				new DayweaveView(
+					leaf,
+					this.store,
+					this.internalEditorClass,
+					(date) => {
+						this.lastViewedDate = date;
+						this.schedulePersistData();
+					},
+				),
+		);
+
+		this.addCommand({
+			id: 'open-dayweave-journal',
+			name: 'Open Dayweave journal',
+			callback: () => void this.openJournal(),
+		});
+
+		this.addRibbonIcon('calendar-days', 'Open Dayweave journal', () => {
+			void this.openJournal();
+		});
+		this.addSettingTab(new DayweaveSettingTab(this.app, this));
+		this.register(() => {
+			if (this.persistTimer !== null) {
+				window.clearTimeout(this.persistTimer);
+			}
+			void this.persistData();
+		});
 	}
 
-	onunload() {}
-
-	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<MyPluginSettings>,
-		);
+	async openJournal(): Promise<void> {
+		if (!this.store.isAvailable()) {
+			new Notice('Enable the core Daily Notes plugin to use Dayweave.');
+			return;
+		}
+		const today = startOfLocalDay(new Date());
+		const configuredDate =
+			this.settings.defaultOpenPosition === 'last-viewed' && this.lastViewedDate
+				? this.lastViewedDate
+				: today;
+		const targetDate = getLockedAnchorDate(configuredDate, today);
+		let leaf = this.app.workspace.getLeavesOfType(DAYWEAVE_VIEW_TYPE)[0];
+		if (!leaf) {
+			leaf = this.app.workspace.getLeaf('tab');
+			await leaf.setViewState({
+				type: DAYWEAVE_VIEW_TYPE,
+				active: true,
+				state: { anchorDate: toDateKey(targetDate) },
+			});
+		}
+		await this.app.workspace.revealLeaf(leaf);
+		const view = leaf.view;
+		if (view instanceof DayweaveView) {
+			await view.goToDate(targetDate, true);
+		}
 	}
 
-	async saveSettings() {
-		await this.saveData(this.settings);
+	async saveSettings(): Promise<void> {
+		await this.persistData();
+		for (const leaf of this.app.workspace.getLeavesOfType(DAYWEAVE_VIEW_TYPE)) {
+			if (leaf.view instanceof DayweaveView) {
+				await leaf.view.goToDate(this.lastViewedDate ?? new Date());
+			}
+		}
+	}
+
+	private async loadSettings(): Promise<void> {
+		try {
+			const data = (await this.loadData()) as DayweaveData | null;
+			this.settings = parseSettings(data);
+			this.lastViewedDate = data?.lastViewedDate
+				? fromDateKey(data.lastViewedDate)
+				: null;
+		} catch (error) {
+			this.settings = { ...DEFAULT_SETTINGS };
+			new Notice(`Could not load Dayweave settings: ${getErrorMessage(error)}`);
+		}
+	}
+
+	private schedulePersistData(): void {
+		if (this.persistTimer !== null) {
+			window.clearTimeout(this.persistTimer);
+		}
+		this.persistTimer = window.setTimeout(() => {
+			this.persistTimer = null;
+			void this.persistData();
+		}, 500);
+	}
+
+	private async persistData(): Promise<void> {
+		await this.saveData({
+			...this.settings,
+			lastViewedDate: this.lastViewedDate
+				? toDateKey(this.lastViewedDate)
+				: undefined,
+		} satisfies DayweaveData);
 	}
 }
 
-class SampleModal extends Modal {
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
+function getErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }

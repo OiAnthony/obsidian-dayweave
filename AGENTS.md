@@ -62,6 +62,7 @@ npm run build
 - **Do not commit build artifacts**: Never commit `node_modules/`, `main.js`, or other generated files to version control.
 - Keep the plugin small. Avoid large dependencies. Prefer browser-compatible packages.
 - Generated output should be placed at the plugin root or `dist/` depending on your build setup. Release artifacts must end up at the top level of the plugin folder in the vault (`main.js`, `manifest.json`, `styles.css`).
+- After changing plugin code, run the production build and install `main.js`, `manifest.json`, and `styles.css` into the current Obsidian vault before reporting completion.
 
 ## Manifest rules (`manifest.json`)
 

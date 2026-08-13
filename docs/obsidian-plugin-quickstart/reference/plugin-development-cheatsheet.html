@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Obsidian 插件开发速查</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f8fafc; --panel:#fff; --text:#18212f; --muted:#526070; --line:#dbe2ea; --accent:#5b35d5; --code:#111827; --code-text:#e5e7eb; --ok:#087f5b; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#141414; --panel:#1d1d1f; --text:#f2f2f3; --muted:#b3b3ba; --line:#39393e; --accent:#a894ff; --code:#0c0d10; --code-text:#ececf1; --ok:#69dbb2; } }
+    * { box-sizing:border-box; }
+    html { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height:1.55; letter-spacing:0; background:var(--bg); color:var(--text); }
+    body { margin:0; }
+    main { width:min(1080px, calc(100% - 32px)); margin:0 auto; padding:48px 0 72px; }
+    header { border-bottom:1px solid var(--line); padding-bottom:28px; margin-bottom:28px; }
+    h1 { font-size:clamp(2rem, 6vw, 3.4rem); line-height:1.08; margin:0 0 12px; letter-spacing:0; }
+    h2 { font-size:1.25rem; margin:0 0 14px; letter-spacing:0; }
+    h3 { font-size:1rem; margin:0 0 8px; letter-spacing:0; }
+    p { margin:0 0 12px; }
+    .lede { color:var(--muted); max-width:68ch; font-size:1.05rem; }
+    .grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; }
+    section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:20px; }
+    section.wide { grid-column:1 / -1; }
+    ul, ol { margin:0; padding-left:22px; }
+    li + li { margin-top:7px; }
+    code, pre { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { font-size:.88em; }
+    pre { margin:12px 0 0; padding:16px; overflow:auto; border-radius:6px; background:var(--code); color:var(--code-text); font-size:.84rem; line-height:1.55; }
+    table { width:100%; border-collapse:collapse; font-size:.94rem; }
+    th, td { text-align:left; vertical-align:top; border-bottom:1px solid var(--line); padding:10px 8px; }
+    th { color:var(--muted); font-weight:600; }
+    .flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .step { border:1px solid var(--line); border-radius:6px; padding:8px 10px; font-family:ui-monospace, monospace; font-size:.88rem; }
+    .arrow { color:var(--text); font-weight:700; }
+    .callout { border-left:3px solid var(--accent); padding-left:12px; color:var(--muted); }
+    .ok { color:var(--ok); font-weight:650; }
+    a { color:var(--accent); text-underline-offset:3px; }
+    :focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+    @media (max-width:760px) { main { width:min(100% - 20px, 680px); padding-top:28px; } .grid { grid-template-columns:minmax(0, 1fr); } section.wide { grid-column:auto; } section { min-width:0; } table { display:block; overflow-x:auto; } }
+    @media print { :root { --bg:#fff; --panel:#fff; --text:#111; --muted:#444; --line:#bbb; } main { width:100%; padding:0; } section { break-inside:avoid; } a { color:inherit; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Obsidian 插件开发速查</h1>
+    <p class="lede">目标不是记住 API，而是掌握从 TypeScript 源码到 Obsidian View 的最短运行路径。</p>
+  </header>
+
+  <div class="grid">
+    <section class="wide">
+      <h2>运行链路</h2>
+      <div class="flow">
+        <span class="step">src/*.ts</span><span class="arrow">→</span>
+        <span class="step">npm run dev</span><span class="arrow">→</span>
+        <span class="step">main.js</span><span class="arrow">→</span>
+        <span class="step">Obsidian reload</span><span class="arrow">→</span>
+        <span class="step">Plugin.onload()</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>三个核心对象</h2>
+      <table>
+        <thead><tr><th>对象</th><th>职责</th></tr></thead>
+        <tbody>
+          <tr><td><code>Plugin</code></td><td>注册命令、View、事件和设置；管理插件生命周期。</td></tr>
+          <tr><td><code>ItemView</code></td><td>定义一个自定义界面实例及其打开、关闭行为。</td></tr>
+          <tr><td><code>WorkspaceLeaf</code></td><td>承载 View 的工作区容器，例如标签页或侧边栏位置。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>生命周期</h2>
+      <ul>
+        <li><code>Plugin.onload()</code>：只做注册和轻量初始化。</li>
+        <li><code>ItemView.onOpen()</code>：向 <code>contentEl</code> 构建界面。</li>
+        <li><code>ItemView.onClose()</code>：释放 View 自己持有的资源。</li>
+        <li><code>Plugin.onunload()</code>：插件停用；已注册资源由框架清理。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>自定义 View 清单</h2>
+      <ol>
+        <li>定义稳定且唯一的 <code>VIEW_TYPE</code>。</li>
+        <li>继承 <code>ItemView</code>。</li>
+        <li>实现 <code>getViewType()</code> 和 <code>getDisplayText()</code>。</li>
+        <li>在 <code>onOpen()</code> 中渲染 <code>contentEl</code>。</li>
+        <li>在插件中调用 <code>registerView()</code>。</li>
+        <li>用 <code>getLeavesOfType()</code> 查找现有实例。</li>
+        <li>没有实例时取得 leaf，再调用 <code>setViewState()</code>。</li>
+        <li>调用 <code>revealLeaf()</code> 展开并聚焦。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>资源清理</h2>
+      <table>
+        <thead><tr><th>资源</th><th>注册方式</th></tr></thead>
+        <tbody>
+          <tr><td>Obsidian event</td><td><code>registerEvent(...)</code></td></tr>
+          <tr><td>DOM event</td><td><code>registerDomEvent(...)</code></td></tr>
+          <tr><td>Interval</td><td><code>registerInterval(...)</code></td></tr>
+          <tr><td>View</td><td><code>registerView(...)</code></td></tr>
+        </tbody>
+      </table>
+      <p class="callout">优先使用框架的注册方法。插件卸载时，Obsidian 才能可靠撤销资源。</p>
+    </section>
+
+    <section class="wide">
+      <h2>常用命令</h2>
+      <pre><code># 在测试 Vault 的插件目录中
+cd /path/to/test-vault/.obsidian/plugins
+
+git clone https://github.com/obsidianmd/obsidian-sample-plugin.git my-view-plugin
+cd my-view-plugin
+npm install
+npm run dev
+
+# 提交前
+npm run build
+npm run lint</code></pre>
+    </section>
+
+    <section>
+      <h2>重载规则</h2>
+      <ul>
+        <li>TypeScript 改动会被 watch build 编译，但 Obsidian 不会自动执行新 bundle。</li>
+        <li>用 Command palette 的 <strong>Reload app without saving</strong>，或停用再启用插件。</li>
+        <li><code>manifest.json</code> 改动后重启 Obsidian。</li>
+        <li>使用新 API 时同步提高 <code>minAppVersion</code>；本课的 <code>revealLeaf()</code> 要求 1.7.2。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>完成标准</h2>
+      <ul>
+        <li class="ok">构建无 TypeScript 错误。</li>
+        <li class="ok">重复打开只复用一个 View。</li>
+        <li class="ok">侧边栏折叠时能自动 reveal。</li>
+        <li class="ok">停用并重启后无残留事件或异常。</li>
+      </ul>
+    </section>
+
+    <section class="wide">
+      <h2>官方入口</h2>
+      <p><a href="https://docs.obsidian.md/Plugins/Getting+started/Build+a+plugin">Build a plugin</a> · <a href="https://docs.obsidian.md/Plugins/User+interface/Views">Views</a> · <a href="https://docs.obsidian.md/Plugins/Events">Events</a> · <a href="https://github.com/obsidianmd/obsidian-sample-plugin">Sample plugin</a></p>
+    </section>
+  </div>
+</main>
+</body>
+</html>

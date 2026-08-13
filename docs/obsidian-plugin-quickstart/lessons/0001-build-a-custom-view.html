@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第一课：构建一个自定义侧边栏 View</title>
+  <style>
+    :root { color-scheme:light dark; --bg:#f7f8fa; --paper:#fff; --text:#17202d; --muted:#596575; --line:#dce2e9; --accent:#5630ca; --accent-soft:#eeeaff; --button:#4b239f; --code:#101318; --code-text:#e8ecf1; --good:#087f5b; --warn:#a35b00; }
+    @media (prefers-color-scheme:dark) { :root { --bg:#121214; --paper:#1c1c1f; --text:#f3f3f5; --muted:#b4b4bd; --line:#39393e; --accent:#aa98ff; --accent-soft:#2c2547; --button:#6742c7; --code:#090a0d; --code-text:#eef0f4; --good:#69dbb2; --warn:#ffbd66; } }
+    * { box-sizing:border-box; }
+    html { font-family:ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height:1.6; letter-spacing:0; background:var(--bg); color:var(--text); scroll-behavior:smooth; }
+    body { margin:0; }
+    main { width:min(920px, calc(100% - 32px)); margin:0 auto; padding:48px 0 80px; }
+    header { padding-bottom:28px; border-bottom:1px solid var(--line); margin-bottom:30px; }
+    .eyebrow { color:var(--accent); font-weight:700; text-transform:uppercase; font-size:.78rem; }
+    h1 { font-size:clamp(2rem, 6vw, 3.6rem); line-height:1.08; margin:8px 0 14px; letter-spacing:0; }
+    h2 { margin:40px 0 14px; font-size:1.45rem; letter-spacing:0; }
+    h3 { margin:24px 0 8px; font-size:1.05rem; letter-spacing:0; }
+    p { margin:0 0 13px; }
+    .lede { max-width:67ch; color:var(--muted); font-size:1.08rem; }
+    .meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+    .tag { border:1px solid var(--line); border-radius:6px; padding:5px 9px; font-size:.85rem; }
+    .model { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin:18px 0; }
+    .model article { border:1px solid var(--line); border-radius:8px; background:var(--paper); padding:16px; }
+    .model strong { display:block; color:var(--accent); margin-bottom:5px; }
+    .callout { border-left:4px solid var(--accent); background:var(--accent-soft); padding:14px 16px; border-radius:0 6px 6px 0; margin:18px 0; }
+    .warning { border-left-color:var(--warn); }
+    pre { background:var(--code); color:var(--code-text); border-radius:8px; padding:18px; overflow:auto; font: .86rem/1.58 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.9em; }
+    ul, ol { padding-left:24px; }
+    li + li { margin-top:8px; }
+    .checklist { list-style:none; padding:0; }
+    .checklist li { border-bottom:1px solid var(--line); padding:9px 0; }
+    .checklist li::before { content:"□"; color:var(--good); font-weight:700; margin-right:10px; }
+    details { border:1px solid var(--line); border-radius:8px; background:var(--paper); padding:14px 16px; margin:12px 0; }
+    summary { cursor:pointer; font-weight:700; }
+    button { min-height:44px; border:0; border-radius:6px; background:var(--button); color:#fff; padding:0 16px; font-weight:700; cursor:pointer; }
+    button:hover { filter:brightness(1.06); }
+    button:focus-visible, a:focus-visible, summary:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+    .quiz { border-top:1px solid var(--line); margin-top:32px; }
+    #feedback { min-height:28px; margin-top:10px; font-weight:650; }
+    a { color:var(--accent); text-underline-offset:3px; }
+    footer { margin-top:48px; padding-top:20px; border-top:1px solid var(--line); color:var(--muted); }
+    @media (max-width:700px) { main { width:min(100% - 20px, 650px); padding-top:28px; } .model { grid-template-columns:1fr; } pre { font-size:.78rem; } }
+    @media print { :root { --bg:#fff; --paper:#fff; --text:#111; --muted:#444; --line:#bbb; --accent:#4b2baa; --accent-soft:#f4f1ff; } main { width:100%; padding:0; } details { break-inside:avoid; } button { display:none; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Lesson 0001 · 约 20 分钟</div>
+    <h1>构建一个自定义侧边栏 View</h1>
+    <p class="lede">完成后，你会得到一个可从 ribbon 打开、不会重复创建、能在右侧边栏自动展开的 Obsidian View。</p>
+    <div class="meta"><span class="tag">TypeScript</span><span class="tag">ItemView</span><span class="tag">WorkspaceLeaf</span><span class="tag">测试 Vault</span></div>
+  </header>
+
+  <section>
+    <h2>先建立模型</h2>
+    <div class="model">
+      <article><strong>Plugin</strong>在 <code>onload()</code> 注册能力。它是插件的生命周期边界。</article>
+      <article><strong>ItemView</strong>描述一个界面实例，在 <code>onOpen()</code> 中渲染。</article>
+      <article><strong>WorkspaceLeaf</strong>是放置 View 的容器。侧边栏和标签页都由 leaf 承载。</article>
+    </div>
+    <p>打开界面的动作不是直接 <code>new ItemView()</code>，而是让 Obsidian 将指定的 View type 放进一个 leaf。注册时提供的 factory 负责创建实例。</p>
+    <div class="callout warning"><strong>数据安全：</strong>官方文档明确建议不要在主 Vault 开发插件。先创建空白测试 Vault。</div>
+  </section>
+
+  <section>
+    <h2>1. 跑通官方模板</h2>
+    <pre><code>cd /path/to/test-vault
+mkdir -p .obsidian/plugins
+cd .obsidian/plugins
+
+git clone https://github.com/obsidianmd/obsidian-sample-plugin.git my-view-plugin
+cd my-view-plugin
+npm install
+npm run dev</code></pre>
+    <p>打开 <code>manifest.json</code>，至少修改以下字段：</p>
+    <pre><code>{
+  "id": "quickstart-task-view",
+  "name": "Quickstart Task View",
+  "minAppVersion": "1.7.2"
+}</code></pre>
+    <p><code>revealLeaf()</code> 从 Obsidian 1.7.2 起可用，因此 manifest 必须声明真实的最低版本。修改 manifest 后重启 Obsidian。</p>
+    <p>然后在 Obsidian 中打开 <strong>Settings → Community plugins</strong>，开启 community plugins，并启用 Quickstart Task View。</p>
+    <div class="callout">观察点：当前官方模板从 <code>src/main.ts</code> 构建仓库根目录的 <code>main.js</code>。开发文档中的旧片段可能仍写作 <code>main.ts</code>。</div>
+  </section>
+
+  <section>
+    <h2>2. 添加 View</h2>
+    <p>新建 <code>src/task-view.ts</code>：</p>
+    <pre><code>import { ItemView, WorkspaceLeaf } from "obsidian";
+
+export const TASK_VIEW_TYPE = "quickstart-task-view";
+
+export class TaskView extends ItemView {
+  constructor(leaf: WorkspaceLeaf) {
+    super(leaf);
+  }
+
+  getViewType(): string {
+    return TASK_VIEW_TYPE;
+  }
+
+  getDisplayText(): string {
+    return "Quick tasks";
+  }
+
+  async onOpen(): Promise&lt;void&gt; {
+    this.contentEl.empty();
+    this.contentEl.createEl("h2", { text: "Quick tasks" });
+
+    const list = this.contentEl.createEl("ul");
+    list.createEl("li", { text: "Open the custom view" });
+    list.createEl("li", { text: "Understand its lifecycle" });
+  }
+
+  async onClose(): Promise&lt;void&gt; {
+    // Release view-owned resources here when needed.
+  }
+}</code></pre>
+    <p><code>TASK_VIEW_TYPE</code> 是内部标识，不是显示名称。所有注册、查找和恢复操作都依赖这个稳定字符串。</p>
+  </section>
+
+  <section>
+    <h2>3. 注册并打开 View</h2>
+    <p>官方模板的 <code>src/settings.ts</code> 反向引用原插件类。这个练习不使用设置，先删除该文件，再把 <code>src/main.ts</code> 替换为：</p>
+    <pre><code>rm src/settings.ts</code></pre>
+    <pre><code>import { Plugin, WorkspaceLeaf } from "obsidian";
+import { TaskView, TASK_VIEW_TYPE } from "./task-view";
+
+export default class QuickstartPlugin extends Plugin {
+  async onload(): Promise&lt;void&gt; {
+    this.registerView(
+      TASK_VIEW_TYPE,
+      (leaf) =&gt; new TaskView(leaf),
+    );
+
+    this.addRibbonIcon("list-checks", "Open quick tasks", () =&gt; {
+      void this.activateTaskView();
+    });
+
+    this.addCommand({
+      id: "open-quick-tasks",
+      name: "Open quick tasks",
+      callback: () =&gt; void this.activateTaskView(),
+    });
+  }
+
+  private async activateTaskView(): Promise&lt;void&gt; {
+    const existingLeaf = this.app.workspace
+      .getLeavesOfType(TASK_VIEW_TYPE)[0];
+
+    let leaf: WorkspaceLeaf | null = existingLeaf ?? null;
+
+    if (!leaf) {
+      leaf = this.app.workspace.getRightLeaf(false);
+      if (!leaf) return;
+
+      await leaf.setViewState({
+        type: TASK_VIEW_TYPE,
+        active: true,
+      });
+    }
+
+    await this.app.workspace.revealLeaf(leaf);
+  }
+}</code></pre>
+    <p>官方 Views 指南警告：不要在插件字段中长期保存 View 引用。Obsidian 可能多次调用 factory；需要访问实例时，应通过 <code>getLeavesOfType()</code> 查询。</p>
+  </section>
+
+  <section>
+    <h2>4. 重载与验证</h2>
+    <ol>
+      <li>确认运行中的 <code>npm run dev</code> 已重新生成 <code>main.js</code>。</li>
+      <li>打开 Command palette，执行 <strong>Reload app without saving</strong>。</li>
+      <li>单击左侧 ribbon 的 list-checks 图标。</li>
+      <li>折叠右侧边栏，再次单击图标，确认边栏自动展开。</li>
+      <li>连续单击三次，确认只存在一个 <strong>Quick tasks</strong> View。</li>
+      <li>停用再启用插件，确认控制台没有异常。</li>
+    </ol>
+    <ul class="checklist">
+      <li>View 显示标题和两个列表项。</li>
+      <li>Command palette 也能打开同一 View。</li>
+      <li>重复打开复用现有 leaf。</li>
+      <li>重新启用插件后仍可正常打开。</li>
+    </ul>
+  </section>
+
+  <section class="quiz">
+    <h2>检索练习</h2>
+    <p>用户连续执行三次 “Open quick tasks”。哪一个 API 决定是否复用现有 View？</p>
+    <button type="button" onclick="answer('register')">registerView()</button>
+    <button type="button" onclick="answer('leaves')">getLeavesOfType()</button>
+    <button type="button" onclick="answer('reveal')">revealLeaf()</button>
+    <p id="feedback" role="status" aria-live="polite"></p>
+    <details>
+      <summary>展开解释</summary>
+      <p><code>getLeavesOfType()</code> 查找已承载该 View type 的 leaf。没有结果时才创建新 leaf。<code>registerView()</code> 注册 factory，<code>revealLeaf()</code> 负责让已有 leaf 可见。</p>
+    </details>
+  </section>
+
+  <section>
+    <h2>下一步边界</h2>
+    <p>先不要添加设置、存储或 Vault 扫描。完成自测后，再把静态列表替换为从当前文件提取任务的界面。那一课会引入 Vault 读取和事件更新。</p>
+    <p>遇到不清楚的 API、编译错误或 Obsidian 行为时，直接向 agent 提问，并附错误文本和相关代码。</p>
+  </section>
+
+  <footer>
+    <p><strong>主要来源：</strong> <a href="https://docs.obsidian.md/Plugins/Getting+started/Build+a+plugin">Build a plugin</a>、<a href="https://docs.obsidian.md/Plugins/User+interface/Views">Views</a>、<a href="https://github.com/obsidianmd/obsidian-sample-plugin">Obsidian Sample Plugin</a>。</p>
+    <p><a href="../reference/plugin-development-cheatsheet.html">打开插件开发速查</a></p>
+  </footer>
+</main>
+<script>
+  function answer(value) {
+    const output = document.getElementById("feedback");
+    if (value === "leaves") {
+      output.textContent = "正确。先查询 leaf，才能决定复用还是创建。";
+      output.style.color = "var(--good)";
+    } else {
+      output.textContent = "再看一次打开流程：哪个 API 返回已有 leaf 列表？";
+      output.style.color = "var(--warn)";
+    }
+  }
+</script>
+</body>
+</html>

@@ -1,8 +1,318 @@
-/*
+.dayweave-view .view-content {
+	padding: 0;
+	overflow: hidden;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.dayweave-view .dayweave-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	min-height: 52px;
+	padding: 8px 16px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+}
 
-If your plugin does not need CSS, delete this file.
+.dayweave-title-group,
+.dayweave-day-header,
+.dayweave-date-button {
+	display: flex;
+	align-items: center;
+}
 
-*/
+.dayweave-title-group {
+	gap: 8px;
+	min-width: 0;
+}
+
+.dayweave-title-group h2 {
+	margin: 0;
+	font-size: var(--font-ui-medium);
+	line-height: 1.2;
+	letter-spacing: 0;
+}
+
+.dayweave-toolbar-subtitle,
+.dayweave-year {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.dayweave-today-button {
+	min-height: 32px;
+}
+
+.dayweave-journal-surface {
+	position: relative;
+	height: calc(100% - 52px);
+	min-height: 0;
+}
+
+.dayweave-scroll {
+	height: 100%;
+	overflow-y: auto;
+	overflow-x: hidden;
+	scrollbar-gutter: stable;
+	overscroll-behavior: contain;
+	padding: 32px max(16px, calc((100% - 760px) / 2));
+}
+
+.dayweave-boundary-prompt {
+	position: absolute;
+	top: 12px;
+	left: 50%;
+	z-index: 2;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	max-width: calc(100% - 24px);
+	padding: 6px 8px 6px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	box-shadow: 0 4px 14px rgb(0 0 0 / 12%);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	opacity: 0;
+	pointer-events: none;
+	transform: translate(-50%, -6px);
+	transition: opacity 160ms ease-out, transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dayweave-boundary-prompt.is-visible {
+	opacity: 1;
+	pointer-events: auto;
+	transform: translate(-50%, 0);
+}
+
+.dayweave-boundary-prompt span {
+	min-width: 0;
+}
+
+.dayweave-boundary-prompt button {
+	flex: 0 0 auto;
+	min-height: 30px;
+	white-space: nowrap;
+}
+
+.dayweave-scroll.is-at-today-boundary .dayweave-day:first-child {
+	animation: dayweave-boundary-resistance 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dayweave-boundary-resistance {
+	50% {
+		transform: translateY(5px);
+	}
+}
+
+.dayweave-day {
+	position: relative;
+	min-height: 152px;
+	padding: 0 0 32px 22px;
+	border-left: 1px solid var(--background-modifier-border);
+}
+
+.dayweave-day::before {
+	position: absolute;
+	top: 14px;
+	left: -5px;
+	width: 9px;
+	height: 9px;
+	border: 2px solid var(--background-primary);
+	border-radius: 50%;
+	background: var(--text-faint);
+	content: '';
+}
+
+.dayweave-day.is-today::before,
+.dayweave-day.is-editing::before {
+	background: var(--interactive-accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 20%, transparent);
+}
+
+.dayweave-day.is-editing .dayweave-date-label {
+	color: var(--interactive-accent);
+}
+
+.dayweave-day-header {
+	justify-content: space-between;
+	gap: 12px;
+	min-height: 38px;
+	margin-bottom: 6px;
+}
+
+.dayweave-view .dayweave-date-button {
+	flex-wrap: wrap;
+	gap: 8px;
+	min-width: 0;
+	min-height: 36px;
+	padding: 4px 6px;
+	border: 0;
+	border-radius: var(--radius-s);
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-normal);
+	cursor: pointer;
+	font-family: inherit;
+	font-size: inherit;
+	font-weight: inherit;
+	text-align: start;
+}
+
+.dayweave-view .dayweave-date-button:hover {
+	background: var(--background-modifier-hover);
+}
+
+.dayweave-view .dayweave-date-button:focus-visible,
+.dayweave-boundary-prompt button:focus-visible,
+.dayweave-scroll:focus-visible,
+.dayweave-viewer:focus-visible {
+	box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+	outline: none;
+}
+
+.dayweave-date-label {
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	line-height: 1.3;
+	letter-spacing: 0;
+}
+
+.dayweave-viewer {
+	min-height: 84px;
+	padding: 10px 12px;
+	border-radius: var(--radius-s);
+	cursor: text;
+}
+
+.dayweave-viewer:hover {
+	background: var(--background-secondary-alt);
+}
+
+.dayweave-viewer.markdown-rendered > :first-child {
+	margin-top: 0;
+}
+
+.dayweave-viewer.markdown-rendered > :last-child {
+	margin-bottom: 0;
+}
+
+.dayweave-editor-host {
+	padding: 0;
+	background: var(--background-primary-alt);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.dayweave-editor-host:hover {
+	background: var(--background-primary-alt);
+}
+
+.dayweave-editor-host .markdown-source-view,
+.dayweave-editor-host .cm-editor {
+	width: 100%;
+	min-height: 120px;
+	border-radius: var(--radius-s);
+	background: transparent;
+	color: var(--text-normal);
+	font-family: var(--font-text);
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal);
+}
+
+.dayweave-editor-host .markdown-source-view {
+	padding: 0;
+	background: transparent;
+}
+
+.dayweave-editor-host .markdown-source-view .cm-editor,
+.dayweave-editor-host .cm-editor.cm-focused {
+	outline: none;
+}
+
+.dayweave-editor-host .cm-scroller {
+	min-height: 120px;
+	max-height: min(70vh, 760px);
+	overflow: auto;
+	font-family: inherit;
+}
+
+.dayweave-editor-host .cm-content {
+	min-height: 120px;
+	padding: 12px 14px;
+	caret-color: var(--text-accent);
+}
+
+.dayweave-editor-host .cm-line {
+	padding: 0;
+}
+
+.dayweave-editor-host .cm-cursor {
+	border-left-color: var(--text-accent);
+}
+
+.dayweave-editor-host .cm-selectionBackground,
+.dayweave-editor-host .cm-content ::selection {
+	background: var(--text-selection) !important;
+}
+
+.dayweave-editor-host .cm-placeholder {
+	color: var(--text-faint);
+}
+
+.dayweave-editor-host .cm-tooltip {
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+}
+
+.dayweave-empty {
+	min-height: 84px;
+	padding: 14px 16px;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	background: var(--background-secondary-alt);
+}
+
+.dayweave-setting-invalid {
+	border-color: var(--text-error) !important;
+}
+
+@media (pointer: coarse) {
+	.dayweave-view .dayweave-date-button {
+		min-height: 44px;
+	}
+}
+
+@media (max-width: 600px) {
+	.dayweave-scroll {
+		padding: 20px 12px max(20px, env(safe-area-inset-bottom));
+	}
+
+	.dayweave-boundary-prompt {
+		top: 8px;
+		align-items: stretch;
+		max-width: calc(100% - 16px);
+	}
+
+	.dayweave-boundary-prompt button {
+		min-height: 44px;
+	}
+
+	.dayweave-day {
+		padding-left: 16px;
+	}
+	.dayweave-editor-host .cm-content {
+		font-size: max(16px, var(--font-text-size));
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.dayweave-view * {
+		transition-duration: 0.01ms !important;
+	}
+
+	.dayweave-scroll.is-at-today-boundary .dayweave-day:first-child {
+		animation: none;
+	}
+}

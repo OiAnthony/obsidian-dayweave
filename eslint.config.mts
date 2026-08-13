@@ -12,6 +12,7 @@ export default defineConfig(
 		'main.js',
 		'package.json',
 		'package-lock.json',
+		'test',
 		'tsconfig.json',
 	]),
 	{
@@ -29,4 +30,19 @@ export default defineConfig(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		files: ['src/main.ts'],
+		rules: {
+			'obsidianmd/commands/no-plugin-id-in-command-id': 'off',
+			'obsidianmd/commands/no-plugin-name-in-command-name': 'off',
+			'obsidianmd/ui/sentence-case': 'off',
+		},
+	},
+	{
+		files: ['src/settings.ts'],
+		rules: {
+			'obsidianmd/settings-tab/prefer-setting-definitions': 'off',
+			'obsidianmd/ui/sentence-case': 'off',
+		},
+	},
 );

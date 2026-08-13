@@ -1,13 +1,14 @@
 {
-	"name": "obsidian-sample-plugin",
+	"name": "obsidian-dayweave",
 	"version": "1.0.0",
-	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+	"description": "Browse and edit Obsidian daily notes in a continuous journal.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
+		"test": "node --import tsx --test test/**/*.test.ts",
 		"lint": "eslint ."
 	},
 	"keywords": [],
@@ -21,7 +22,12 @@
 		"globals": "^17.6.0",
 		"jiti": "^2.6.1",
 		"obsidian": "latest",
+		"tsx": "^4.20.6",
 		"typescript": "^5.8.3",
 		"typescript-eslint": "^8.59.1"
+	},
+	"dependencies": {
+		"@codemirror/state": "6.5.0",
+		"@codemirror/view": "6.38.6"
 	}
 }
