@@ -17,7 +17,7 @@ import {
 	shiftWindow,
 } from './journal-window';
 import { renderMarkdownPreview } from './markdown-preview';
-import { shouldActivateViewer } from './viewer-interaction';
+import { shouldActivateViewer, shouldHandleBoundaryKey } from './viewer-interaction';
 import { shouldDiscardNewNote } from './journal-draft';
 import { renderAfterFinishing, renderNavigationTarget } from './journal-navigation';
 
@@ -475,13 +475,13 @@ export class DayweaveView extends ItemView {
 	}
 
 	private handleWheel(event: WheelEvent): void {
-		if (event.deltaY < 0) {
+		if (event.deltaY < 0 && !isEmbeddedEditorEvent(event)) {
 			this.handleBoundaryPush(performance.now());
 		}
 	}
 
 	private handleScrollKey(event: KeyboardEvent): void {
-		if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
+		if (shouldHandleBoundaryKey(event.key, isEmbeddedEditorEvent(event))) {
 			this.handleBoundaryPush(performance.now());
 		}
 	}
@@ -771,6 +771,10 @@ class UnavailableEditor {
 
 function isInteractivePreviewTarget(target: EventTarget | null): boolean {
 	return target instanceof Element && Boolean(target.closest('a, button, input, textarea, select'));
+}
+
+function isEmbeddedEditorEvent(event: Event): boolean {
+	return event.target instanceof Element && Boolean(event.target.closest('.dayweave-editor-host'));
 }
 
 function getErrorMessage(error: unknown): string {
