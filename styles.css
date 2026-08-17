@@ -197,8 +197,12 @@
 	margin-bottom: 0;
 }
 
-.dayweave-editor-host {
+.dayweave-live-preview-host {
 	padding: 0;
+	background: transparent;
+}
+
+.dayweave-editor-host {
 	background: var(--background-primary-alt);
 	box-shadow: 0 0 0 1px var(--interactive-accent);
 }
@@ -207,10 +211,10 @@
 	background: var(--background-primary-alt);
 }
 
-.dayweave-editor-host .markdown-source-view,
-.dayweave-editor-host .cm-editor {
+.dayweave-live-preview-host .markdown-source-view,
+.dayweave-live-preview-host .cm-editor {
 	width: 100%;
-	min-height: 120px;
+	min-height: 84px;
 	border-radius: var(--radius-s);
 	background: transparent;
 	color: var(--text-normal);
@@ -219,30 +223,45 @@
 	line-height: var(--line-height-normal);
 }
 
-.dayweave-editor-host .markdown-source-view {
+.dayweave-live-preview-host .markdown-source-view {
 	padding: 0;
 	background: transparent;
 }
 
-.dayweave-editor-host .markdown-source-view .cm-editor,
-.dayweave-editor-host .cm-editor.cm-focused {
+.dayweave-live-preview-host .markdown-source-view .cm-editor,
+.dayweave-live-preview-host .cm-editor.cm-focused {
 	outline: none;
 }
 
-.dayweave-editor-host .cm-scroller {
-	min-height: 120px;
-	max-height: min(70vh, 760px);
-	overflow: auto;
+.dayweave-live-preview-host .cm-scroller {
+	min-height: 84px;
+	overflow: visible;
 	font-family: inherit;
 }
 
+.dayweave-live-preview-host .cm-content {
+	min-height: 84px;
+	padding: 12px 14px;
+	caret-color: transparent;
+}
+
+.dayweave-editor-host .markdown-source-view,
+.dayweave-editor-host .cm-editor,
+.dayweave-editor-host .cm-scroller,
 .dayweave-editor-host .cm-content {
 	min-height: 120px;
-	padding: 12px 14px;
+}
+
+.dayweave-editor-host .cm-scroller {
+	max-height: min(70vh, 760px);
+	overflow: auto;
+}
+
+.dayweave-editor-host .cm-content {
 	caret-color: var(--text-accent);
 }
 
-.dayweave-editor-host .cm-line {
+.dayweave-live-preview-host .cm-line {
 	padding: 0;
 }
 
@@ -250,16 +269,20 @@
 	border-left-color: var(--text-accent);
 }
 
+.dayweave-live-preview-host:not(.dayweave-editor-host) .cm-cursor {
+	display: none !important;
+}
+
 .dayweave-editor-host .cm-selectionBackground,
 .dayweave-editor-host .cm-content ::selection {
 	background: var(--text-selection) !important;
 }
 
-.dayweave-editor-host .cm-placeholder {
+.dayweave-live-preview-host .cm-placeholder {
 	color: var(--text-faint);
 }
 
-.dayweave-editor-host .cm-tooltip {
+.dayweave-live-preview-host .cm-tooltip {
 	border: 1px solid var(--background-modifier-border);
 	background: var(--background-primary);
 	color: var(--text-normal);

@@ -1,5 +1,5 @@
-import { App, Component, Editor, TFile } from 'obsidian';
-import { Compartment, EditorSelection, StateEffect } from '@codemirror/state';
+import type { App, Component, Editor, TFile } from 'obsidian';
+import { Compartment, EditorSelection, EditorState, Prec, StateEffect } from '@codemirror/state';
 import { EditorView, ViewUpdate } from '@codemirror/view';
 
 interface PrivateMarkdownEmbed extends Component {
@@ -57,6 +57,11 @@ export interface EmbeddedEditorCallbacks {
 	onCommit(value: string): void;
 }
 
+export interface EditorCoordinates {
+	x: number;
+	y: number;
+}
+
 export function discoverInternalEditor(app: App): InternalEditorConstructor | null {
 	let embed: PrivateMarkdownEmbed | null = null;
 	try {
@@ -84,11 +89,17 @@ export function discoverInternalEditor(app: App): InternalEditorConstructor | nu
 	}
 }
 
-export class EmbeddedObsidianEditor {
-	private readonly editable = new Compartment();
+export class EmbeddedObsidianDocument {
+	private readonly mode = new Compartment();
 	private instance: InternalEditorInstance | null = null;
 	private callbacks: EmbeddedEditorCallbacks | null = null;
 	private controller: InternalEditorController | null = null;
+	private eventRoot: HTMLElement | null = null;
+	private eventWindow: Window | null = null;
+	private editingSession: Component | null = null;
+	private editing = false;
+	private runtimeEditorState: typeof EditorState = EditorState;
+	private runtimeEditorView: typeof EditorView = EditorView;
 
 	constructor(
 		private readonly app: App,
@@ -100,10 +111,8 @@ export class EmbeddedObsidianEditor {
 		parent: HTMLElement,
 		file: TFile,
 		value: string,
-		callbacks: EmbeddedEditorCallbacks,
 	): void {
 		this.destroy();
-		this.callbacks = callbacks;
 		let instance: InternalEditorInstance | null = null;
 		const controller: InternalEditorController = {
 			app: this.app,
@@ -127,39 +136,84 @@ export class EmbeddedObsidianEditor {
 		controller.editMode = instance;
 		this.controller = controller;
 		this.instance = instance;
+		this.eventRoot = parent;
+		this.eventWindow = parent.ownerDocument.defaultView;
 		instance.set(value);
+		const stateConstructor = instance.cm.state.constructor as typeof EditorState;
+		const viewConstructor = instance.cm.constructor as typeof EditorView;
+		this.runtimeEditorState = stateConstructor.readOnly ? stateConstructor : EditorState;
+		this.runtimeEditorView = viewConstructor.editable ? viewConstructor : EditorView;
 		instance.cm.dispatch({
 			effects: StateEffect.appendConfig.of([
-				this.editable.of(EditorView.editable.of(true)),
-				EditorView.updateListener.of((update: ViewUpdate) => {
-					if (update.docChanged) {
+				this.mode.of([
+					Prec.highest(this.runtimeEditorState.readOnly.of(true)),
+					Prec.highest(this.runtimeEditorView.editable.of(false)),
+				]),
+				this.runtimeEditorView.updateListener.of((update: ViewUpdate) => {
+					if (this.editing && update.docChanged) {
 						this.callbacks?.onChange(update.state.doc.toString());
 					}
 				}),
-				EditorView.domEventHandlers({
-					focus: () => {
-						this.app.workspace.activeEditor = controller;
-						(this.app as PrivateApp).mobileToolbar?.update();
-						return false;
-					},
-				}),
 			]),
 		});
-		instance.cm.contentDOM.addEventListener('keydown', this.handleKeydown, true);
-		instance.cm.contentDOM.addEventListener('focusout', this.handleFocusout);
-		const end = instance.cm.state.doc.length;
-		instance.cm.dispatch({ selection: EditorSelection.cursor(end), scrollIntoView: true });
+		instance.cm.contentDOM.contentEditable = 'false';
+	}
+
+	beginEditing(
+		callbacks: EmbeddedEditorCallbacks,
+		coordinates?: EditorCoordinates,
+	): void {
+		const instance = this.instance;
+		const controller = this.controller;
+		const eventRoot = this.eventRoot;
+		const eventWindow = this.eventWindow;
+		if (!instance || !controller || !eventRoot || !eventWindow) {
+			throw new Error('Embedded editor is not initialized');
+		}
+		this.callbacks = callbacks;
+		this.editing = true;
+		this.configureReadOnly(false);
+		const SessionComponent = this.owner.constructor as new () => Component;
+		const session = this.owner.addChild(new SessionComponent());
+		session.registerDomEvent(eventWindow, 'keydown', this.handleKeydown, true);
+		session.registerDomEvent(eventRoot, 'focusout', this.handleFocusout, true);
+		this.editingSession = session;
+		this.app.workspace.activeEditor = controller;
+		(this.app as PrivateApp).mobileToolbar?.update();
+		const position = coordinates
+			? instance.cm.posAtCoords({ x: coordinates.x, y: coordinates.y })
+			: null;
+		const cursor = position ?? instance.cm.state.doc.length;
+		instance.cm.dispatch({ selection: EditorSelection.cursor(cursor), scrollIntoView: true });
 		instance.editor.focus();
+	}
+
+	endEditing(): void {
+		const instance = this.instance;
+		if (!instance || !this.editing) {
+			return;
+		}
+		if (this.editingSession) {
+			this.owner.removeChild(this.editingSession);
+			this.editingSession = null;
+		}
+		this.configureReadOnly(true);
+		this.editing = false;
+		this.callbacks = null;
+		if (this.app.workspace.activeEditor === this.controller) {
+			this.app.workspace.activeEditor = null;
+			(this.app as PrivateApp).mobileToolbar?.update();
+		}
 	}
 
 	getValue(): string {
 		return this.instance?.editor.getValue() ?? '';
 	}
 
-	setReadOnly(readOnly: boolean): void {
-		this.instance?.cm.dispatch({
-			effects: this.editable.reconfigure(EditorView.editable.of(!readOnly)),
-		});
+	setEditingReadOnly(readOnly: boolean): void {
+		if (this.editing) {
+			this.configureReadOnly(readOnly);
+		}
 	}
 
 	focus(): void {
@@ -171,20 +225,42 @@ export class EmbeddedObsidianEditor {
 		if (!instance) {
 			return;
 		}
-		instance.cm.contentDOM.removeEventListener('keydown', this.handleKeydown, true);
-		instance.cm.contentDOM.removeEventListener('focusout', this.handleFocusout);
-		if (this.app.workspace.activeEditor === this.controller) {
-			this.app.workspace.activeEditor = null;
-			(this.app as PrivateApp).mobileToolbar?.update();
-		}
+		this.endEditing();
 		this.owner.removeChild(instance);
 		this.instance = null;
 		this.controller = null;
+		this.eventRoot = null;
+		this.eventWindow = null;
 		this.callbacks = null;
 	}
 
+	private configureReadOnly(readOnly: boolean): void {
+		const instance = this.instance;
+		if (!instance) {
+			return;
+		}
+		instance.cm.dispatch({
+			effects: this.mode.reconfigure([
+				Prec.highest(this.runtimeEditorState.readOnly.of(readOnly)),
+				Prec.highest(this.runtimeEditorView.editable.of(!readOnly)),
+			]),
+		});
+		instance.cm.contentDOM.contentEditable = readOnly ? 'false' : 'true';
+	}
+
+	private isEditorTarget(target: EventTarget | null): target is Node {
+		return Boolean(
+			target &&
+			typeof (target as { nodeType?: unknown }).nodeType === 'number' &&
+			this.instance?.cm.dom.contains(target as Node),
+		);
+	}
+
 	private readonly handleKeydown = (event: KeyboardEvent): void => {
-		if (event.key !== 'Escape') {
+		if (
+			event.key !== 'Escape' ||
+			!this.isEditorTarget(event.target)
+		) {
 			return;
 		}
 		event.preventDefault();
@@ -194,7 +270,7 @@ export class EmbeddedObsidianEditor {
 
 	private readonly handleFocusout = (event: FocusEvent): void => {
 		const nextTarget = event.relatedTarget;
-		if (nextTarget instanceof Node && this.instance?.cm.dom.contains(nextTarget)) {
+		if (this.isEditorTarget(nextTarget)) {
 			return;
 		}
 		this.callbacks?.onCommit(this.getValue());

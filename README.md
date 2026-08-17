@@ -10,8 +10,8 @@ Dayweave adds a continuous daily-note journal to Obsidian. It uses normal Markdo
 - Create missing daily notes without leaving the journal.
 - Edit the complete file in Obsidian's own embedded Live Preview editor.
 - Keep Obsidian's Markdown decorations, properties, folding, spelling, editor settings, and registered editor extensions.
-- Use normal multiline editing: Enter creates a line, and Escape saves and returns to the rendered viewer.
-- Keep only one embedded Obsidian editor and a bounded 21-day viewer window mounted while scrolling.
+- Use normal multiline editing: Enter creates a line, and Escape saves and returns to read-only Live Preview.
+- Keep a bounded 21-day Live Preview window mounted while scrolling, with only one date editable at a time.
 - Restore the current journal position through Obsidian workspace state.
 
 ## Daily Notes integration
@@ -22,9 +22,9 @@ Under **Settings -> Dayweave**, configure:
 
 - **Default open position**: today or the last viewed date.
 
-Dayweave has two states for each date: a rendered viewer and an embedded Obsidian Live Preview editor for the complete Markdown file. Click anywhere in the viewer outside an interactive link or control to edit. Enter behaves as a normal newline; press **Escape** to save and return to the rendered viewer. Only one date can be in edit mode at a time.
+Dayweave renders each existing daily note with Obsidian's embedded Live Preview editor. Notes are read-only while browsing, so source blank lines and editor decorations stay consistent when switching modes. Click a note to edit it in place. Enter behaves as a normal newline; press **Escape** to save and return to read-only Live Preview. Only one date can be editable at a time, and the mounted journal window remains bounded to 21 days.
 
-The embedded editor uses Obsidian's internal Markdown editor because the public plugin API does not expose a mountable Live Preview editor. Dayweave checks this integration at startup. If an Obsidian update changes the internal interface, the journal remains readable and reports that editing is unavailable instead of opening a second pane or falling back to a different editor.
+The embedded editor uses Obsidian's internal Markdown editor because the public plugin API does not expose a mountable Live Preview editor. Dayweave checks this integration at startup. If an Obsidian update changes the internal interface, affected notes fall back to rendered Markdown so the journal remains readable, while editing reports that Live Preview is unavailable.
 
 Dayweave writes the complete editor value back to the same Markdown file. If another editor changes that file while Dayweave has an unsaved draft, Dayweave refuses to overwrite the external change and keeps the draft read-only while the journal remains open. Closing the journal saves that draft as a uniquely named `*.dayweave-recovery*.md` file beside the daily note.
 

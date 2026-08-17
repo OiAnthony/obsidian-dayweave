@@ -2,7 +2,8 @@ import { Notice, Component, ItemView, TAbstractFile, TFile, WorkspaceLeaf } from
 import { DailyNoteStore } from './daily-note-store';
 import { compareDates, fromDateKey, startOfLocalDay, toDateKey } from './date';
 import {
-	EmbeddedObsidianEditor,
+	EditorCoordinates,
+	EmbeddedObsidianDocument,
 	InternalEditorConstructor,
 } from './embedded-obsidian-editor';
 import {
@@ -35,6 +36,7 @@ interface DayweaveViewState {
 interface ActiveFile {
 	date: Date;
 	file: TFile;
+	document: EmbeddedObsidianDocument;
 	baseContent: string;
 	created: boolean;
 	dirty: boolean;
@@ -54,10 +56,12 @@ export class DayweaveView extends ItemView {
 	private readonly cardComponents = new Map<string, Component>();
 	private readonly cardRefreshVersions = new Map<string, number>();
 	private readonly writingPaths = new Set<string>();
-	private readonly inlineEditor: EmbeddedObsidianEditor;
+	private documents = new Map<string, EmbeddedObsidianDocument>();
 	private activeFile: ActiveFile | null = null;
+	private previewFallbackNotified = false;
 	private saveTimer: number | null = null;
 	private savePromise: Promise<void> | null = null;
+	private editTransition: Promise<void> = Promise.resolve();
 	private finishPromise: Promise<void> | null = null;
 	private recoveryPromise: Promise<TFile | null> | null = null;
 	private renderVersion = 0;
@@ -70,11 +74,6 @@ export class DayweaveView extends ItemView {
 		private readonly onAnchorChange: (date: Date) => void,
 	) {
 		super(leaf);
-		this.inlineEditor = new EmbeddedObsidianEditor(
-			this.app,
-			this,
-			EditorClass ?? UnavailableEditor as unknown as InternalEditorConstructor,
-		);
 	}
 
 	getViewType(): string {
@@ -104,6 +103,7 @@ export class DayweaveView extends ItemView {
 			this.visitedFutureDate = false;
 		}
 		if (this.scrollEl) {
+			await this.editTransition;
 			await this.finishEditing();
 			if (!this.activeFile) {
 				await this.renderWindow(this.anchorDate);
@@ -127,6 +127,7 @@ export class DayweaveView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		await this.editTransition;
 		await this.finishEditing();
 		await this.preserveConflictedDraft();
 		this.renderVersion += 1;
@@ -136,6 +137,7 @@ export class DayweaveView extends ItemView {
 	}
 
 	async goToDate(date: Date, openEditor = false): Promise<void> {
+		await this.editTransition;
 		await this.finishEditing();
 		if (this.activeFile) {
 			return;
@@ -232,12 +234,13 @@ export class DayweaveView extends ItemView {
 		const nextComponent = new Component();
 		this.addChild(nextComponent);
 		const nextCardComponents = new Map<string, Component>();
+		const nextDocuments = new Map<string, EmbeddedObsidianDocument>();
 		const fragment = createFragment();
 		const cards = await Promise.all(dates.map((date) => {
 			const component = new Component();
 			nextComponent.addChild(component);
 			nextCardComponents.set(toDateKey(date), component);
-			return this.createDayCard(date, component);
+			return this.createDayCard(date, component, nextDocuments);
 		}));
 		if (version !== this.renderVersion || !this.scrollEl) {
 			this.removeChild(nextComponent);
@@ -248,6 +251,7 @@ export class DayweaveView extends ItemView {
 		}
 		this.unloadWindowComponent();
 		this.windowComponent = nextComponent;
+		this.documents = nextDocuments;
 		for (const [key, component] of nextCardComponents) {
 			this.cardComponents.set(key, component);
 		}
@@ -271,7 +275,11 @@ export class DayweaveView extends ItemView {
 		this.updateVisibleAnchor();
 	}
 
-	private async createDayCard(date: Date, component: Component): Promise<HTMLElement> {
+	private async createDayCard(
+		date: Date,
+		component: Component,
+		documents: Map<string, EmbeddedObsidianDocument>,
+	): Promise<HTMLElement> {
 		const key = toDateKey(date);
 		const content = await this.store.read(date);
 		const card = createDiv({ cls: 'dayweave-day', attr: { 'data-date': key } });
@@ -293,7 +301,7 @@ export class DayweaveView extends ItemView {
 			cls: 'dayweave-date-label',
 		});
 		dateButton.createSpan({ text: String(date.getFullYear()), cls: 'dayweave-year' });
-		dateButton.addEventListener('click', () => void this.editDate(date));
+		component.registerDomEvent(dateButton, 'click', () => void this.editDate(date));
 
 		if (content === null) {
 			const empty = card.createDiv({
@@ -301,8 +309,8 @@ export class DayweaveView extends ItemView {
 				attr: { role: 'button', tabindex: '0', 'aria-label': `Edit note for ${key}` },
 				text: 'No note for this day.',
 			});
-			empty.addEventListener('click', () => void this.editDate(date));
-			empty.addEventListener('keydown', (event) => {
+			component.registerDomEvent(empty, 'click', () => void this.editDate(date));
+			component.registerDomEvent(empty, 'keydown', (event) => {
 				if (shouldActivateViewer(event)) {
 					event.preventDefault();
 					void this.editDate(date);
@@ -313,14 +321,33 @@ export class DayweaveView extends ItemView {
 				cls: 'dayweave-viewer',
 				attr: { role: 'button', tabindex: '0', 'aria-label': `Edit note for ${key}` },
 			});
-			await renderMarkdownPreview(this.app, content, viewer, this.store.getPath(date), component);
-			viewer.addEventListener('click', (event) => {
-				if (!isInteractivePreviewTarget(event.target)) {
-					event.preventDefault();
-					void this.editDate(date);
-				}
-			});
-			viewer.addEventListener('keydown', (event) => {
+			const file = this.store.getFile(date);
+			const document = file ? this.mountReadOnlyDocument(viewer, file, content, component) : null;
+			if (document) {
+				documents.set(key, document);
+				viewer.addClass('dayweave-live-preview-host');
+				component.registerDomEvent(viewer, 'pointerdown', (event) => {
+					if (
+						event.button !== 0 ||
+						(event.metaKey || event.ctrlKey) && isInteractivePreviewTarget(event.target)
+					) {
+						return;
+					}
+					if (this.activeFile && compareDates(date, this.activeFile.date) !== 0) {
+						event.preventDefault();
+					}
+					void this.editDate(date, { x: event.clientX, y: event.clientY });
+				}, true);
+			} else {
+				await renderMarkdownPreview(this.app, content, viewer, this.store.getPath(date), component);
+				component.registerDomEvent(viewer, 'click', (event) => {
+					if (!isInteractivePreviewTarget(event.target)) {
+						event.preventDefault();
+						void this.editDate(date);
+					}
+				});
+			}
+			component.registerDomEvent(viewer, 'keydown', (event) => {
 				if (shouldActivateViewer(event)) {
 					event.preventDefault();
 					void this.editDate(date);
@@ -330,14 +357,63 @@ export class DayweaveView extends ItemView {
 		return card;
 	}
 
-	private async editDate(date: Date): Promise<void> {
+	private mountReadOnlyDocument(
+		viewer: HTMLElement,
+		file: TFile,
+		content: string,
+		component: Component,
+	): EmbeddedObsidianDocument | null {
+		if (!this.EditorClass) {
+			return null;
+		}
+		const document = new EmbeddedObsidianDocument(this.app, component, this.EditorClass);
+		try {
+			document.mount(viewer, file, content);
+			component.register(() => document.destroy());
+			return document;
+		} catch {
+			document.destroy();
+			viewer.empty();
+			if (!this.previewFallbackNotified) {
+				this.previewFallbackNotified = true;
+				new Notice('Dayweave could not open live preview. Using rendered Markdown instead.');
+			}
+			return null;
+		}
+	}
+
+	private async discardCreatedEmptyNote(date: Date, file: TFile): Promise<boolean> {
+		if (this.store.getFile(date) !== file) {
+			return false;
+		}
+		this.writingPaths.add(file.path);
+		try {
+			const content = await this.app.vault.cachedRead(file);
+			if (!shouldDiscardNewNote(true, content) || this.store.getFile(date) !== file) {
+				return false;
+			}
+			await this.app.fileManager.trashFile(file);
+			return true;
+		} finally {
+			this.writingPaths.delete(file.path);
+		}
+	}
+
+	private editDate(date: Date, coordinates?: EditorCoordinates): Promise<void> {
+		const transition = this.editTransition.then(() => this.editDateOnce(date, coordinates));
+		this.editTransition = transition.catch(() => {});
+		return transition;
+	}
+
+	private async editDateOnce(date: Date, coordinates?: EditorCoordinates): Promise<void> {
+		let createdFile: TFile | null = null;
 		try {
 			if (!this.EditorClass) {
 				new Notice('Dayweave cannot access the Obsidian editor in this app version.');
 				return;
 			}
 			if (this.activeFile && compareDates(date, this.activeFile.date) === 0) {
-				this.inlineEditor.focus();
+				this.activeFile.document.focus();
 				return;
 			}
 			await this.finishEditing();
@@ -346,32 +422,44 @@ export class DayweaveView extends ItemView {
 			}
 			const existingFile = this.store.getFile(date);
 			const file = existingFile ?? await this.store.create(date);
-			await this.refreshCard(date);
-			const content = (await this.store.read(date)) ?? '';
+			if (!existingFile) {
+				createdFile = file;
+				await this.refreshCard(date);
+			}
 			const card = this.getCard(date);
 			const viewer = card?.querySelector<HTMLElement>('.dayweave-viewer');
-			if (!card || !viewer) {
-				return;
+			const document = this.documents.get(toDateKey(date));
+			if (!card || !viewer || !document) {
+				throw new Error('Live Preview is unavailable for this note');
 			}
+			const content = document.getValue();
 			this.activeFile = {
-				date: startOfLocalDay(date), file, baseContent: content,
+				date: startOfLocalDay(date), file, document, baseContent: content,
 				created: existingFile === null,
 				dirty: false, conflicted: false,
 			};
 			card.addClass('is-editing');
-			viewer.empty();
 			viewer.removeAttribute('role');
 			viewer.removeAttribute('tabindex');
 			viewer.addClass('dayweave-editor-host');
-			this.inlineEditor.mount(viewer, file, content, {
+			document.beginEditing({
 				onChange: () => this.handleEditorChange(),
 				onCommit: () => void this.finishEditing(),
-			});
+			}, coordinates);
 			window.requestAnimationFrame(() => {
-				this.inlineEditor.focus();
+				if (this.activeFile?.document !== document) {
+					return;
+				}
+				document.focus();
 				viewer.scrollIntoView({ block: 'nearest' });
 			});
 		} catch (error) {
+			if (createdFile) {
+				const discarded = await this.discardCreatedEmptyNote(date, createdFile).catch(() => false);
+				if (discarded) {
+					await this.refreshCard(date).catch(() => undefined);
+				}
+			}
 			new Notice(`Could not edit daily note: ${getErrorMessage(error)}`);
 		}
 	}
@@ -402,8 +490,8 @@ export class DayweaveView extends ItemView {
 		if (!active || !active.dirty || active.conflicted) {
 			return;
 		}
-		const value = this.inlineEditor.getValue();
-		this.inlineEditor.setReadOnly(true);
+		const value = active.document.getValue();
+		active.document.setEditingReadOnly(true);
 		this.writingPaths.add(active.file.path);
 		try {
 			const saved = await this.app.vault.process(active.file, (current) => {
@@ -424,7 +512,7 @@ export class DayweaveView extends ItemView {
 		} finally {
 			this.writingPaths.delete(active.file.path);
 			if (this.activeFile === active) {
-				this.inlineEditor.setReadOnly(active.conflicted);
+				active.document.setEditingReadOnly(active.conflicted);
 			}
 		}
 	}
@@ -445,15 +533,16 @@ export class DayweaveView extends ItemView {
 			window.clearTimeout(this.saveTimer);
 			this.saveTimer = null;
 		}
-		if (this.inlineEditor.getValue() !== active.baseContent) {
+		if (active.document.getValue() !== active.baseContent) {
 			active.dirty = true;
 		}
 		if (active.conflicted) {
-			this.inlineEditor.focus();
+			active.document.focus();
 			return;
 		}
-		if (shouldDiscardNewNote(active.created, this.inlineEditor.getValue())) {
-			this.inlineEditor.destroy();
+		if (shouldDiscardNewNote(active.created, active.document.getValue())) {
+			active.document.destroy();
+			this.documents.delete(toDateKey(active.date));
 			this.activeFile = null;
 			this.writingPaths.add(active.file.path);
 			try {
@@ -469,9 +558,14 @@ export class DayweaveView extends ItemView {
 		} catch {
 			return;
 		}
-		this.inlineEditor.destroy();
+		active.document.endEditing();
 		this.activeFile = null;
-		await this.refreshCard(active.date);
+		const card = this.getCard(active.date);
+		const viewer = card?.querySelector<HTMLElement>('.dayweave-viewer');
+		card?.removeClass('is-editing');
+		viewer?.removeClass('dayweave-editor-host');
+		viewer?.setAttribute('role', 'button');
+		viewer?.setAttribute('tabindex', '0');
 	}
 
 	private handleWheel(event: WheelEvent): void {
@@ -525,6 +619,7 @@ export class DayweaveView extends ItemView {
 		}
 		this.shifting = true;
 		try {
+			await this.editTransition;
 			await this.finishEditing();
 			if (this.activeFile) {
 				return;
@@ -575,6 +670,7 @@ export class DayweaveView extends ItemView {
 	}
 
 	private async relockFutureDates(date: Date): Promise<void> {
+		await this.editTransition;
 		await renderAfterFinishing(
 			date,
 			() => this.finishEditing(),
@@ -654,22 +750,34 @@ export class DayweaveView extends ItemView {
 		const parent = this.windowComponent;
 		const previous = this.cardComponents.get(key);
 		const next = new Component();
+		const nextDocuments = new Map<string, EmbeddedObsidianDocument>();
 		parent.addChild(next);
-		const replacement = await this.createDayCard(date, next);
+		const replacement = await this.createDayCard(date, next, nextDocuments);
 		if (this.cardRefreshVersions.get(key) !== version || !current.isConnected || this.windowComponent !== parent) {
 			if (this.windowComponent === parent) {
 				parent.removeChild(next);
 			}
 			return;
 		}
+		if (this.activeFile && compareDates(date, this.activeFile.date) === 0) {
+			parent.removeChild(next);
+			return;
+		}
 		if (previous) {
 			parent.removeChild(previous);
 		}
 		this.cardComponents.set(key, next);
+		const nextDocument = nextDocuments.get(key);
+		if (nextDocument) {
+			this.documents.set(key, nextDocument);
+		} else {
+			this.documents.delete(key);
+		}
 		current.replaceWith(replacement);
 	}
 
 	private handleVaultRename(file: TAbstractFile, oldPath: string): void {
+		this.renderVersion += 1;
 		for (const card of this.getDayCards()) {
 			const date = fromDateKey(card.dataset.date ?? '');
 			if (date && (this.store.getPath(date) === oldPath || this.store.getPath(date) === file.path)) {
@@ -687,6 +795,7 @@ export class DayweaveView extends ItemView {
 		if (!(file instanceof TFile) || this.writingPaths.has(file.path)) {
 			return;
 		}
+		this.renderVersion += 1;
 		for (const card of this.getDayCards()) {
 			const date = fromDateKey(card.dataset.date ?? '');
 			if (date && this.store.getPath(date) === file.path) {
@@ -709,7 +818,7 @@ export class DayweaveView extends ItemView {
 			return;
 		}
 		this.activeFile.conflicted = true;
-		this.inlineEditor.setReadOnly(true);
+		this.activeFile.document.setEditingReadOnly(true);
 		new Notice('This note changed outside the journal. Your draft is preserved while this view remains open.');
 	}
 
@@ -731,7 +840,7 @@ export class DayweaveView extends ItemView {
 		try {
 			const recovery = await this.store.createRecovery(
 				active.file,
-				this.inlineEditor.getValue(),
+				active.document.getValue(),
 			);
 			new Notice(`Dayweave saved the conflicted draft to ${recovery.path}.`);
 			return recovery;
@@ -742,7 +851,8 @@ export class DayweaveView extends ItemView {
 	}
 
 	private async reloadActiveCard(date: Date): Promise<void> {
-		this.inlineEditor.destroy();
+		this.activeFile?.document.destroy();
+		this.documents.delete(toDateKey(date));
 		this.activeFile = null;
 		await this.refreshCard(date);
 	}
@@ -752,8 +862,9 @@ export class DayweaveView extends ItemView {
 	}
 
 	private unloadWindowComponent(): void {
-		this.inlineEditor.destroy();
+		this.activeFile?.document.endEditing();
 		this.activeFile = null;
+		this.documents.clear();
 		this.cardComponents.clear();
 		this.cardRefreshVersions.clear();
 		if (this.windowComponent) {
@@ -763,18 +874,22 @@ export class DayweaveView extends ItemView {
 	}
 }
 
-class UnavailableEditor {
-	constructor() {
-		throw new Error('Obsidian embedded editor is unavailable');
-	}
-}
-
 function isInteractivePreviewTarget(target: EventTarget | null): boolean {
-	return target instanceof Element && Boolean(target.closest('a, button, input, textarea, select'));
+	return Boolean(getClosestElement(
+		target,
+		'a, button, input, textarea, select, [data-href], .cm-hmd-internal-link, .cm-url',
+	));
 }
 
 function isEmbeddedEditorEvent(event: Event): boolean {
-	return event.target instanceof Element && Boolean(event.target.closest('.dayweave-editor-host'));
+	return Boolean(getClosestElement(event.target, '.dayweave-editor-host'));
+}
+
+function getClosestElement(target: EventTarget | null, selector: string): Element | null {
+	if (!target || typeof (target as { closest?: unknown }).closest !== 'function') {
+		return null;
+	}
+	return (target as unknown as { closest(selector: string): Element | null }).closest(selector);
 }
 
 function getErrorMessage(error: unknown): string {
