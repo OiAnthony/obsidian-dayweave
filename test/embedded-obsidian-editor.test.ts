@@ -10,8 +10,23 @@ import {
 class FakeContentDom {
 	readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
 	readonly nodeType = 1;
-	contentEditable = 'inherit';
+	private editable = 'inherit';
+	focused = false;
+	onDisabledWhileFocused: (() => void) | null = null;
 	ownerDocument: { defaultView: FakeContentDom | null } = { defaultView: null };
+
+	get contentEditable(): string {
+		return this.editable;
+	}
+
+	set contentEditable(value: string) {
+		const losesFocus = this.focused && this.editable === 'true' && value === 'false';
+		this.editable = value;
+		if (losesFocus) {
+			this.focused = false;
+			this.onDisabledWhileFocused?.();
+		}
+	}
 
 	addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
 		const listeners = this.listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>();
@@ -50,6 +65,9 @@ class FakeCodeMirror {
 	dispatch(spec: TransactionSpec): void {
 		this.state = this.state.update(spec).state;
 		this.owner.lastSelection = this.state.selection.main.head;
+		this.contentDOM.contentEditable = this.state.facet(FakeCodeMirror.editable)
+			? 'true'
+			: 'false';
 	}
 
 	posAtCoords(): number {
@@ -65,6 +83,7 @@ class FakeInternalEditor {
 	readonly editor = {
 		focus: () => {
 			this.focusCount += 1;
+			this.contentDOM.focused = true;
 		},
 		getValue: () => this.cm.state.doc.toString(),
 	};
@@ -141,6 +160,9 @@ function createDocument(): {
 	);
 	document.mount(eventRoot as unknown as HTMLElement, { path: 'daily.md' } as TFile, 'alpha');
 	assert.ok(fakeInstance);
+	fakeInstance.contentDOM.onDisabledWhileFocused = () => {
+		invokeDomListeners(eventRoot, 'focusout', { relatedTarget: null });
+	};
 	return { document, instance: fakeInstance, app, removed, eventRoot, eventWindow };
 }
 
@@ -222,18 +244,30 @@ test('handles edit-session events without ambient DOM constructors', () => {
 	document.destroy();
 });
 
-test('locks both editing gates during save and unloads once', () => {
-	const { document, instance, removed } = createDocument();
-	document.beginEditing({ onChange: () => undefined, onCommit: () => undefined });
+test('locks transactions during save without ending the focused edit session', () => {
+	const { document, instance, removed, eventRoot } = createDocument();
+	let commits = 0;
+	document.beginEditing({
+		onChange: () => undefined,
+		onCommit: () => {
+			commits += 1;
+		},
+	});
 	document.setEditingReadOnly(true);
+	assert.equal(commits, 0);
 	assert.equal(instance.cm.state.facet(EditorState.readOnly), true);
-	assert.equal(instance.cm.state.facet(FakeCodeMirror.editable), false);
-	assert.equal(instance.contentDOM.contentEditable, 'false');
+	assert.equal(instance.cm.state.facet(FakeCodeMirror.editable), true);
+	assert.equal(instance.contentDOM.contentEditable, 'true');
+	assert.equal(instance.contentDOM.focused, true);
 
 	document.setEditingReadOnly(false);
 	assert.equal(instance.cm.state.facet(EditorState.readOnly), false);
 	assert.equal(instance.cm.state.facet(FakeCodeMirror.editable), true);
 	assert.equal(instance.contentDOM.contentEditable, 'true');
+	assert.equal(instance.contentDOM.focused, true);
+	assert.equal(commits, 0);
+	invokeDomListeners(eventRoot, 'focusout', { relatedTarget: null });
+	assert.equal(commits, 1);
 	document.destroy();
 	document.destroy();
 	assert.equal(removed.count, 1);

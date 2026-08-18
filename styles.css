@@ -252,11 +252,6 @@
 	min-height: 120px;
 }
 
-.dayweave-editor-host .cm-scroller {
-	max-height: min(70vh, 760px);
-	overflow: auto;
-}
-
 .dayweave-editor-host .cm-content {
 	caret-color: var(--text-accent);
 }

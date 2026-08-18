@@ -90,7 +90,8 @@ export function discoverInternalEditor(app: App): InternalEditorConstructor | nu
 }
 
 export class EmbeddedObsidianDocument {
-	private readonly mode = new Compartment();
+	private readonly readOnlyMode = new Compartment();
+	private readonly editableMode = new Compartment();
 	private instance: InternalEditorInstance | null = null;
 	private callbacks: EmbeddedEditorCallbacks | null = null;
 	private controller: InternalEditorController | null = null;
@@ -145,10 +146,8 @@ export class EmbeddedObsidianDocument {
 		this.runtimeEditorView = viewConstructor.editable ? viewConstructor : EditorView;
 		instance.cm.dispatch({
 			effects: StateEffect.appendConfig.of([
-				this.mode.of([
-					Prec.highest(this.runtimeEditorState.readOnly.of(true)),
-					Prec.highest(this.runtimeEditorView.editable.of(false)),
-				]),
+				this.readOnlyMode.of(Prec.highest(this.runtimeEditorState.readOnly.of(true))),
+				this.editableMode.of(Prec.highest(this.runtimeEditorView.editable.of(false))),
 				this.runtimeEditorView.updateListener.of((update: ViewUpdate) => {
 					if (this.editing && update.docChanged) {
 						this.callbacks?.onChange(update.state.doc.toString());
@@ -156,7 +155,6 @@ export class EmbeddedObsidianDocument {
 				}),
 			]),
 		});
-		instance.cm.contentDOM.contentEditable = 'false';
 	}
 
 	beginEditing(
@@ -172,7 +170,7 @@ export class EmbeddedObsidianDocument {
 		}
 		this.callbacks = callbacks;
 		this.editing = true;
-		this.configureReadOnly(false);
+		this.configureEditingMode(false);
 		const SessionComponent = this.owner.constructor as new () => Component;
 		const session = this.owner.addChild(new SessionComponent());
 		session.registerDomEvent(eventWindow, 'keydown', this.handleKeydown, true);
@@ -197,7 +195,7 @@ export class EmbeddedObsidianDocument {
 			this.owner.removeChild(this.editingSession);
 			this.editingSession = null;
 		}
-		this.configureReadOnly(true);
+		this.configureEditingMode(true);
 		this.editing = false;
 		this.callbacks = null;
 		if (this.app.workspace.activeEditor === this.controller) {
@@ -240,12 +238,27 @@ export class EmbeddedObsidianDocument {
 			return;
 		}
 		instance.cm.dispatch({
-			effects: this.mode.reconfigure([
+			effects: this.readOnlyMode.reconfigure(
 				Prec.highest(this.runtimeEditorState.readOnly.of(readOnly)),
-				Prec.highest(this.runtimeEditorView.editable.of(!readOnly)),
-			]),
+			),
 		});
-		instance.cm.contentDOM.contentEditable = readOnly ? 'false' : 'true';
+	}
+
+	private configureEditingMode(readOnly: boolean): void {
+		const instance = this.instance;
+		if (!instance) {
+			return;
+		}
+		instance.cm.dispatch({
+			effects: [
+				this.readOnlyMode.reconfigure(
+					Prec.highest(this.runtimeEditorState.readOnly.of(readOnly)),
+				),
+				this.editableMode.reconfigure(
+					Prec.highest(this.runtimeEditorView.editable.of(!readOnly)),
+				),
+			],
+		});
 	}
 
 	private isEditorTarget(target: EventTarget | null): target is Node {
