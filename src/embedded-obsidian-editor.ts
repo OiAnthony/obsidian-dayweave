@@ -98,6 +98,7 @@ export class EmbeddedObsidianDocument {
 	private eventRoot: HTMLElement | null = null;
 	private eventWindow: Window | null = null;
 	private editingSession: Component | null = null;
+	private focusCheckTimer: number | null = null;
 	private editing = false;
 	private runtimeEditorState: typeof EditorState = EditorState;
 	private runtimeEditorView: typeof EditorView = EditorView;
@@ -175,6 +176,8 @@ export class EmbeddedObsidianDocument {
 		const session = this.owner.addChild(new SessionComponent());
 		session.registerDomEvent(eventWindow, 'keydown', this.handleKeydown, true);
 		session.registerDomEvent(eventRoot, 'focusout', this.handleFocusout, true);
+		session.registerDomEvent(eventRoot, 'focusin', this.scheduleFocusCheck, true);
+		session.registerDomEvent(eventWindow, 'focus', this.scheduleFocusCheck, true);
 		this.editingSession = session;
 		this.app.workspace.activeEditor = controller;
 		(this.app as PrivateApp).mobileToolbar?.update();
@@ -195,9 +198,16 @@ export class EmbeddedObsidianDocument {
 			this.owner.removeChild(this.editingSession);
 			this.editingSession = null;
 		}
-		this.configureEditingMode(true);
+		if (this.focusCheckTimer !== null) {
+			this.eventWindow?.clearTimeout(this.focusCheckTimer);
+			this.focusCheckTimer = null;
+		}
 		this.editing = false;
 		this.callbacks = null;
+		if (instance.cm.contentDOM.ownerDocument.activeElement === instance.cm.contentDOM) {
+			instance.cm.contentDOM.blur();
+		}
+		this.configureEditingMode(true);
 		if (this.app.workspace.activeEditor === this.controller) {
 			this.app.workspace.activeEditor = null;
 			(this.app as PrivateApp).mobileToolbar?.update();
@@ -286,6 +296,28 @@ export class EmbeddedObsidianDocument {
 		if (this.isEditorTarget(nextTarget)) {
 			return;
 		}
-		this.callbacks?.onCommit(this.getValue());
+		this.scheduleFocusCheck();
+	};
+
+	private readonly scheduleFocusCheck = (): void => {
+		if (!this.editing || !this.eventWindow || this.focusCheckTimer !== null) {
+			return;
+		}
+		// Let Obsidian finish its own focus handlers before inspecting or claiming focus.
+		this.focusCheckTimer = this.eventWindow.setTimeout(() => {
+			this.focusCheckTimer = null;
+			const document = this.eventRoot?.ownerDocument;
+			if (!this.editing || !document?.hasFocus()) {
+				return;
+			}
+			if (this.isEditorTarget(document.activeElement)) {
+				if (this.app.workspace.activeEditor !== this.controller) {
+					this.app.workspace.activeEditor = this.controller;
+					(this.app as PrivateApp).mobileToolbar?.update();
+				}
+				return;
+			}
+			this.callbacks?.onCommit(this.getValue());
+		}, 0);
 	};
 }

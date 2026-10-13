@@ -10,10 +10,18 @@ import {
 class FakeContentDom {
 	readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
 	readonly nodeType = 1;
+	readonly children = new Set<FakeContentDom>();
+	private readonly timers = new Map<number, () => void>();
+	private nextTimer = 0;
 	private editable = 'inherit';
 	focused = false;
 	onDisabledWhileFocused: (() => void) | null = null;
-	ownerDocument: { defaultView: FakeContentDom | null } = { defaultView: null };
+	ownerDocument: {
+		defaultView: FakeContentDom | null;
+		activeElement: FakeContentDom | null;
+		focused: boolean;
+		hasFocus(): boolean;
+	} = { defaultView: null, activeElement: null, focused: true, hasFocus() { return this.focused; } };
 
 	get contentEditable(): string {
 		return this.editable;
@@ -37,9 +45,33 @@ class FakeContentDom {
 	removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
 		this.listeners.get(type)?.delete(listener);
 	}
+	setTimeout(callback: () => void): number {
+		const id = ++this.nextTimer;
+		this.timers.set(id, callback);
+		return id;
+	}
+
+	clearTimeout(id: number): void {
+		this.timers.delete(id);
+	}
+
+	flushTimers(): void {
+		for (const [id, callback] of [...this.timers]) {
+			this.timers.delete(id);
+			callback();
+		}
+	}
+
+	blur(): void {
+		this.focused = false;
+		if (this.ownerDocument.activeElement === this) {
+			this.ownerDocument.activeElement = null;
+		}
+	}
+
 
 	contains(target?: unknown): boolean {
-		return target === this;
+		return target === this || [...this.children].some((child) => child.contains(target));
 	}
 }
 
@@ -60,6 +92,7 @@ class FakeCodeMirror {
 
 	constructor(private readonly owner: FakeInternalEditor) {
 		this.contentDOM = owner.contentDOM;
+		this.dom.children.add(this.contentDOM);
 	}
 
 	dispatch(spec: TransactionSpec): void {
@@ -84,6 +117,7 @@ class FakeInternalEditor {
 		focus: () => {
 			this.focusCount += 1;
 			this.contentDOM.focused = true;
+			this.contentDOM.ownerDocument.activeElement = this.contentDOM;
 		},
 		getValue: () => this.cm.state.doc.toString(),
 	};
@@ -160,8 +194,9 @@ function createDocument(): {
 	);
 	document.mount(eventRoot as unknown as HTMLElement, { path: 'daily.md' } as TFile, 'alpha');
 	assert.ok(fakeInstance);
+	fakeInstance.contentDOM.ownerDocument = eventRoot.ownerDocument;
 	fakeInstance.contentDOM.onDisabledWhileFocused = () => {
-		invokeDomListeners(eventRoot, 'focusout', { relatedTarget: null });
+		invokeDomListeners(eventRoot, 'focusout', { target: fakeInstance?.contentDOM, relatedTarget: null });
 	};
 	return { document, instance: fakeInstance, app, removed, eventRoot, eventWindow };
 }
@@ -266,9 +301,86 @@ test('locks transactions during save without ending the focused edit session', (
 	assert.equal(instance.contentDOM.contentEditable, 'true');
 	assert.equal(instance.contentDOM.focused, true);
 	assert.equal(commits, 0);
-	invokeDomListeners(eventRoot, 'focusout', { relatedTarget: null });
+	instance.contentDOM.ownerDocument.activeElement = null;
+	invokeDomListeners(eventRoot, 'focusout', { target: instance.contentDOM, relatedTarget: null });
+	instance.contentDOM.ownerDocument.defaultView!.flushTimers();
 	assert.equal(commits, 1);
 	document.destroy();
 	document.destroy();
 	assert.equal(removed.count, 1);
+});
+
+test('preserves the editing session and selection across native window switches', () => {
+	const { document, instance, app, eventRoot, eventWindow } = createDocument();
+	let commits = 0;
+	document.beginEditing({ onChange: () => undefined, onCommit: () => { commits += 1; } }, { x: 1, y: 1 });
+	const controller = app.workspace.activeEditor;
+	const selection = instance.cm.state.selection;
+	eventRoot.ownerDocument.focused = false;
+	invokeDomListeners(eventRoot, 'focusout', { target: instance.contentDOM, relatedTarget: null });
+	eventWindow.flushTimers();
+	assert.equal(commits, 0);
+	assert.equal(instance.cm.state.readOnly, false);
+	app.workspace.activeEditor = { otherEditor: true };
+	eventRoot.ownerDocument.focused = true;
+	invokeDomListeners(eventWindow, 'focus', {});
+	eventWindow.flushTimers();
+	assert.equal(app.workspace.activeEditor, controller);
+	assert.equal(instance.cm.state.selection, selection);
+	assert.equal(instance.focusCount, 1);
+	document.destroy();
+});
+
+test('commits a null-target focus loss inside the active window', () => {
+	const { document, instance, eventRoot, eventWindow } = createDocument();
+	let commits = 0;
+	document.beginEditing({ onChange: () => undefined, onCommit: () => { commits += 1; } });
+	eventRoot.ownerDocument.activeElement = null;
+	invokeDomListeners(eventRoot, 'focusout', { target: instance.contentDOM, relatedTarget: null });
+	eventWindow.flushTimers();
+	assert.equal(commits, 1);
+	document.destroy();
+});
+
+test('uses settled focus when Obsidian reassigns the workspace editor', () => {
+	const { document, instance, app, eventRoot, eventWindow } = createDocument();
+	let commits = 0;
+	document.beginEditing({ onChange: () => undefined, onCommit: () => { commits += 1; } });
+	const controller = app.workspace.activeEditor;
+	invokeDomListeners(eventRoot, 'focusin', { target: instance.contentDOM });
+	app.workspace.activeEditor = { otherEditor: true };
+	eventWindow.flushTimers();
+	assert.equal(app.workspace.activeEditor, controller);
+	assert.equal(commits, 0);
+	document.destroy();
+});
+
+test('does not steal focus when returning to another control', () => {
+	const { document, app, instance, eventRoot, eventWindow } = createDocument();
+	let commits = 0;
+	document.beginEditing({ onChange: () => undefined, onCommit: () => { commits += 1; document.endEditing(); } });
+	const otherControl = new FakeContentDom();
+	const otherEditor = { otherEditor: true };
+	eventRoot.ownerDocument.activeElement = otherControl;
+	app.workspace.activeEditor = otherEditor;
+	invokeDomListeners(eventWindow, 'focus', {});
+	eventWindow.flushTimers();
+	assert.equal(commits, 1);
+	assert.equal(eventRoot.ownerDocument.activeElement, otherControl);
+	assert.equal(app.workspace.activeEditor, otherEditor);
+	assert.equal(instance.focusCount, 1);
+	document.destroy();
+});
+
+test('ending a session releases native focus and cancels pending focus checks', () => {
+	const { document, instance, app, eventRoot, eventWindow } = createDocument();
+	let commits = 0;
+	document.beginEditing({ onChange: () => undefined, onCommit: () => { commits += 1; } });
+	invokeDomListeners(eventRoot, 'focusout', { target: instance.contentDOM, relatedTarget: null });
+	document.endEditing();
+	assert.notEqual(eventRoot.ownerDocument.activeElement, instance.contentDOM);
+	eventWindow.flushTimers();
+	assert.equal(commits, 0);
+	assert.equal(app.workspace.activeEditor, null);
+	document.destroy();
 });

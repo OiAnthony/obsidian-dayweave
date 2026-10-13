@@ -245,6 +245,10 @@
 	caret-color: transparent;
 }
 
+.dayweave-live-preview-host:not(.dayweave-editor-host) .cm-content {
+	caret-color: transparent !important;
+}
+
 .dayweave-editor-host .markdown-source-view,
 .dayweave-editor-host .cm-editor,
 .dayweave-editor-host .cm-scroller,
